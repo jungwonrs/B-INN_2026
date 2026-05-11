@@ -1,4 +1,4 @@
-# B-INN: Verifying Image Ownership with Invertible Neural Network and Blockchain-based Verifiable Credential
+# B-INN
 
 This repository contains the implementation of the B-INN framework, which integrates an Invertible Neural Network (INN) with blockchain-supported Verifiable Credentials (VC) for digital image ownership verification.
 
