@@ -219,7 +219,7 @@ def run_experiment(exp_name, config_overrides, train_dir, val_dir):
     full_train_dataset = RealImageDataset(train_dir, image_size=Config.IMAGE_SIZE)
     full_val_dataset = RealImageDataset(val_dir, image_size=Config.IMAGE_SIZE)
 
-    POOL_SIZE = 3000
+    POOL_SIZE = 5000
     TARGET_ITERS = 3000
     val_sampler = RandomSampler(full_val_dataset, replacement=True, num_samples=100)
     val_loader = DataLoader(full_val_dataset, batch_size=Config.BATCH_SIZE, sampler=val_sampler, num_workers=0)

@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
 contract registration {
+    uint256 public constant THRESHOLD_SCALE = 10000;
 
     struct VerifiableCredential {
         bytes32 id;
@@ -11,14 +11,19 @@ contract registration {
         bytes32 imageHash;
         uint256 authThreshold;
         bytes signature;
-        string status;
+        bool revoked;
     }
 
     mapping(bytes32 => VerifiableCredential) private userVC;
     mapping(bytes32 => bool) public revocationList;
 
-    event VCIssued(bytes32 indexed vcId, address indexed owner);
+    event VCIssued(bytes32 indexed vcId, address indexed owner, bytes32 indexed imageHash);
     event VCRevoked(bytes32 indexed vcId, address indexed owner);
+
+    modifier vcExists(bytes32 vcId) {
+        require(userVC[vcId].owner != address(0), "VC does not exist");
+        _;
+    }
 
     modifier onlyOwnerOf(bytes32 vcId) {
         require(userVC[vcId].owner == msg.sender, "Not credential owner");
@@ -32,7 +37,16 @@ contract registration {
         uint256 authThreshold,
         bytes calldata signature
     ) external returns (bytes32) {
-        bytes32 vcId = keccak256(abi.encodePacked(msg.sender, secretKeyHash));
+        require(expiredAt > block.timestamp, "Expiration must be in the future");
+        require(authThreshold <= THRESHOLD_SCALE, "Threshold exceeds scale");
+
+        bytes32 vcId = sha256(abi.encode(
+            msg.sender,
+            secretKeyHash,
+            imageHash,
+            block.timestamp,
+            block.chainid
+        ));
         require(userVC[vcId].owner == address(0), "VC already exists");
 
         userVC[vcId] = VerifiableCredential({
@@ -43,14 +57,14 @@ contract registration {
             imageHash: imageHash,
             authThreshold: authThreshold,
             signature: signature,
-            status: "activate"
+            revoked: false
         });
 
-        emit VCIssued(vcId, msg.sender);
+        emit VCIssued(vcId, msg.sender, imageHash);
         return vcId;
     }
 
-    function callVC(bytes32 vcId) external view onlyOwnerOf(vcId) returns (
+    function callVC(bytes32 vcId) external view vcExists(vcId) onlyOwnerOf(vcId) returns (
         bytes32 id,
         address owner,
         uint256 issuedAt,
@@ -60,23 +74,54 @@ contract registration {
         string memory status
     ) {
         VerifiableCredential storage vc = userVC[vcId];
-        require(keccak256(bytes(vc.status)) == keccak256(bytes("activate")), "VC not active");
-        return (vc.id, vc.owner, vc.issuedAt, vc.expiredAt, vc.imageHash, vc.authThreshold, vc.status);
+        status = isValidVC(vcId) ? "activate" : "inactivate";
+        return (vc.id, vc.owner, vc.issuedAt, vc.expiredAt, vc.imageHash, vc.authThreshold, status);
     }
 
-    function revokeVC(bytes32 vcId) external onlyOwnerOf(vcId) {
+    function revokeVC(bytes32 vcId) external vcExists(vcId) onlyOwnerOf(vcId) {
         VerifiableCredential storage vc = userVC[vcId];
-        require(keccak256(bytes(vc.status)) == keccak256(bytes("activate")), "Already inactive");
-        vc.status = "inactivate";
+        require(!vc.revoked, "Already revoked");
+        vc.revoked = true;
         revocationList[vcId] = true;
         emit VCRevoked(vcId, msg.sender);
     }
 
-    function getVCHash(bytes32 vcId) external view returns (bytes32) {
+    function isValidVC(bytes32 vcId) public view returns (bool) {
         VerifiableCredential storage vc = userVC[vcId];
-        return keccak256(abi.encodePacked(
-            vc.id, vc.owner, vc.issuedAt, vc.expiredAt,
-            vc.imageHash, vc.authThreshold
+        return vc.owner != address(0) && !vc.revoked && block.timestamp <= vc.expiredAt;
+    }
+
+    function getVCHash(bytes32 vcId) public view vcExists(vcId) returns (bytes32) {
+        VerifiableCredential storage vc = userVC[vcId];
+        return sha256(abi.encode(
+            vc.id,
+            vc.owner,
+            vc.issuedAt,
+            vc.expiredAt,
+            vc.imageHash,
+            vc.authThreshold,
+            vc.signature
         ));
+    }
+
+    function getVCBinding(bytes32 vcId) external view vcExists(vcId) returns (
+        bytes32 vcHash,
+        address owner,
+        bytes32 imageHash,
+        uint256 authThreshold,
+        uint256 issuedAt,
+        uint256 expiredAt,
+        bool active
+    ) {
+        VerifiableCredential storage vc = userVC[vcId];
+        return (
+            getVCHash(vcId),
+            vc.owner,
+            vc.imageHash,
+            vc.authThreshold,
+            vc.issuedAt,
+            vc.expiredAt,
+            isValidVC(vcId)
+        );
     }
 }
